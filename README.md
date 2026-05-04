@@ -1,6 +1,6 @@
 # Cipher
 
-A terminal coding agent in the spirit of Claude Code — minimal, hackable, and built to be read end-to-end in an afternoon. ~3K lines of Python. Twelve tools. A plugin system. Run it against the Anthropic API, or point it at a local model via Ollama.
+A terminal coding agent in the spirit of Claude Code. Minimal, hackable, and built to be read end-to-end in an afternoon. ~3K lines of Python, twelve tools, a plugin system. Run it against the Anthropic API, or point it at a local model via Ollama.
 
 ```
    ██████╗██╗██████╗ ██╗  ██╗███████╗██████╗
@@ -34,7 +34,7 @@ python3 main.py
 - **Auto-compaction.** Conversation summarizes itself before hitting the context window.
 - **Undo.** `/undo` rolls back the last file change.
 - **Branching.** `/branch` forks the current conversation so you can try an alternate approach without losing the original.
-- **Session logs.** Every session is written to `.cipher/sessions/` as markdown — searchable, replayable, shareable.
+- **Session logs.** Every session is written to `.cipher/sessions/` as markdown. Searchable, replayable, shareable.
 - **Plugin system.** Drop a Python file with a `Tool` subclass into `~/.cipher/plugins/` and the agent picks it up next launch.
 - **Project memory.** A `.cipher/memory.md` persists across sessions per project.
 - **Autonomous mode.** `/auto` toggles consent-free execution (for CI, scripted runs, fearless evenings).
@@ -110,7 +110,7 @@ All settings live in `.env` (see `.env.example`). The most useful knobs:
 
 | Variable | Default | What it does |
 |---|---|---|
-| `ANTHROPIC_API_KEY` | — | Required unless `LOCAL_MODEL=true` |
+| `ANTHROPIC_API_KEY` | (none) | Required unless `LOCAL_MODEL=true` |
 | `CIPHER_DEFAULT_MODEL` | `claude-sonnet-4-6` | Aliases `sonnet`/`haiku`/`opus` accepted |
 | `LOCAL_MODEL` | `false` | Use a local Ollama model instead |
 | `OLLAMA_URL` | `http://localhost:11434/v1` | OpenAI-compatible base URL |
@@ -121,10 +121,10 @@ All settings live in `.env` (see `.env.example`). The most useful knobs:
 
 ## Status
 
-This is the open-source harness — agent loop, tool system, REPL. A separate fine-tuning track (training data, LoRA weights, eval harness) lives privately and is not part of this repo.
+This is the open-source harness: agent loop, tool system, REPL. A separate fine-tuning track (training data, LoRA weights, eval harness) lives privately and is not part of this repo.
 
 Contributions welcome. Tools should be one file. Slash commands should be obvious. If a feature needs a paragraph to explain, it probably needs to be smaller.
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+MIT. See [LICENSE](LICENSE).
