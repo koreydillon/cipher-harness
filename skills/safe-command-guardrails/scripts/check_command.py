@@ -13,6 +13,7 @@ Usage:
   echo "git push --force" | python3 check_command.py
   python3 check_command.py --json "DROP TABLE users"
   python3 check_command.py --hook          # Claude Code PreToolUse mode (JSON on stdin)
+                                           # exit 0 with a decision or silence; exit 1 + stderr = fail open
   python3 check_command.py --self-test
 
 Standard library only. Python 3.8 or newer. Works on macOS, Linux, and Windows.
@@ -240,7 +241,32 @@ SELF_TEST = [
 ]
 
 
+def _payload(command: str, tool_name: str = "Bash") -> str:
+    return json.dumps({
+        "session_id": "selftest", "transcript_path": "/tmp/t.jsonl", "cwd": "/tmp",
+        "permission_mode": "default", "hook_event_name": "PreToolUse",
+        "tool_name": tool_name, "tool_input": {"command": command, "description": "selftest"},
+        "tool_use_id": "toolu_selftest",
+    })
+
+
+# (label, raw stdin, expected exit, expected permissionDecision or None, expect warning)
+HOOK_SELF_TEST = [
+    ("allow stays silent", _payload("ls -la"), 0, None, False),
+    ("confirm asks", _payload("git push origin main"), 0, "ask", False),
+    ("block denies", _payload("rm -rf /"), 0, "deny", False),
+    ("secret denies", _payload("git add .env"), 0, "deny", False),
+    ("malformed JSON fails open", '{"tool_name":"Bash","tool_input":{', 1, None, True),
+    ("empty stdin fails open", "", 1, None, True),
+    ("whitespace stdin fails open", "   \n", 1, None, True),
+    ("non-object JSON fails open", "[1,2,3]", 1, None, True),
+    ("non-Bash tool passes through", json.dumps({"tool_name": "Read", "tool_input": {"file_path": "/etc/hosts"}}), 0, None, False),
+    ("missing tool_input passes through", json.dumps({"tool_name": "Bash"}), 0, None, False),
+]
+
+
 def self_test() -> int:
+    global classify
     failures = 0
     for cmd, expected in SELF_TEST:
         tier, reason = classify(cmd)
@@ -248,7 +274,30 @@ def self_test() -> int:
         failures += 0 if ok else 1
         mark = "ok  " if ok else "FAIL"
         print(f"{mark} {expected:7s} got {tier:7s} {cmd!r} ({reason})")
-    total = len(SELF_TEST)
+
+    print("\nhook mode:")
+    for label, raw, exp_code, exp_decision, exp_warn in HOOK_SELF_TEST:
+        code, out, warning = hook_decision(raw)
+        decision = out["hookSpecificOutput"]["permissionDecision"] if out else None
+        ok = code == exp_code and decision == exp_decision and bool(warning) == exp_warn
+        failures += 0 if ok else 1
+        mark = "ok  " if ok else "FAIL"
+        print(f"{mark} {label}: exit={code} decision={decision} warning={'yes' if warning else 'no'}")
+
+    # classifier crash must fail open with a warning, not a traceback or a block
+    real = classify
+    try:
+        def _boom(cmd):
+            raise ZeroDivisionError("forced")
+        classify = _boom
+        code, out, warning = hook_decision(_payload("ls"))
+    finally:
+        classify = real
+    ok = code == 1 and out is None and bool(warning)
+    failures += 0 if ok else 1
+    print(f"{'ok  ' if ok else 'FAIL'} classifier crash fails open: exit={code} warning={'yes' if warning else 'no'}")
+
+    total = len(SELF_TEST) + len(HOOK_SELF_TEST) + 1
     print(f"\n{total - failures}/{total} passed")
     return 1 if failures else 0
 
@@ -263,20 +312,37 @@ def _read_stdin() -> str:
         return ""
 
 
-def _hook_mode() -> int:
-    """Claude Code PreToolUse hook: JSON in, JSON decision out, always exit 0."""
-    raw = _read_stdin()
+HOOK_WARN_PREFIX = "safe-command-guardrails hook: "
+
+
+def hook_decision(raw: str) -> tuple[int, dict | None, str | None]:
+    """Classify a Claude Code PreToolUse payload.
+
+    Returns (exit_code, stdout_json_or_None, stderr_warning_or_None).
+
+    Fail-open contract: any problem with the payload or the classifier yields
+    exit 1 with a one-line warning and no decision. Claude Code treats that as a
+    non-blocking hook error, shows the warning, and lets the call continue
+    through the normal permission flow. The hook never silently blocks.
+    """
+    if not raw or not raw.strip():
+        return 1, None, HOOK_WARN_PREFIX + "empty stdin, expected PreToolUse JSON; failing open"
     try:
-        payload = json.loads(raw) if raw.strip() else {}
-    except json.JSONDecodeError:
-        return 0
-    tool_input = payload.get("tool_input") or {}
+        payload = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        return 1, None, HOOK_WARN_PREFIX + f"malformed JSON on stdin ({exc.msg}); failing open"
+    if not isinstance(payload, dict):
+        return 1, None, HOOK_WARN_PREFIX + "payload is not a JSON object; failing open"
+    tool_input = payload.get("tool_input")
     cmd = tool_input.get("command") if isinstance(tool_input, dict) else None
-    if not cmd:
-        return 0  # not a shell call, no opinion
-    tier, reason = classify(cmd)
+    if not isinstance(cmd, str) or not cmd.strip():
+        return 0, None, None  # not a shell call: no decision, normal flow applies
+    try:
+        tier, reason = classify(cmd)
+    except Exception as exc:  # classifier bug: never turn it into a lockout
+        return 1, None, HOOK_WARN_PREFIX + f"classifier error {type(exc).__name__}: {exc}; failing open"
     if tier == ALLOW:
-        return 0  # stay silent so the user's normal permission flow applies
+        return 0, None, None  # silent: the hook never approves, it only objects
     out = {
         "hookSpecificOutput": {
             "hookEventName": "PreToolUse",
@@ -284,8 +350,21 @@ def _hook_mode() -> int:
             "permissionDecisionReason": f"safe-command-guardrails {tier}: {reason}",
         }
     }
-    print(json.dumps(out))
-    return 0
+    return 0, out, None
+
+
+def _hook_mode() -> int:
+    """Claude Code PreToolUse hook: JSON in, JSON decision out."""
+    try:
+        code, out, warning = hook_decision(_read_stdin())
+    except Exception as exc:  # last line of defense, still fail open
+        print(HOOK_WARN_PREFIX + f"unexpected {type(exc).__name__}: {exc}; failing open", file=sys.stderr)
+        return 1
+    if warning:
+        print(warning, file=sys.stderr)
+    if out is not None:
+        print(json.dumps(out))
+    return code
 
 
 def main(argv: list[str]) -> int:

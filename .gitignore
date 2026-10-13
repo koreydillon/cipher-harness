@@ -32,3 +32,6 @@ Thumbs.db
 .idea/
 *.swp
 *~
+
+# Local upload sheet for Agensi (generated, not committed)
+UPLOAD.md

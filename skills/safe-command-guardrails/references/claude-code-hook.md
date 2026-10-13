@@ -51,9 +51,18 @@ classifies it, and prints one of these decisions:
 | CONFIRM | `ask` | The normal permission prompt appears with the reason attached, even in auto-approve modes. |
 | ALLOW | no output | The hook stays silent and your usual permission settings apply. |
 
-The script always exits 0 in hook mode so that a parsing problem never
-turns into a confusing "hook error" banner. If the payload is not a Bash call,
-or has no command, the hook stays silent.
+If the payload is not a Bash call, or has no command, the hook stays silent
+with exit 0, which means "no decision" and your normal permission flow runs.
+
+Two things worth knowing about `ask` and `deny`:
+
+- A hook `ask` forces the permission prompt even in auto mode. The prompt shows
+  the reason text. So CONFIRM-tier commands still get a human decision when
+  the user has otherwise told Claude Code not to ask.
+- A hook `deny` prevents the call and the reason is shown to Claude, so it can
+  explain the refusal and propose a safer command.
+- Permission rules in your settings are still evaluated on top of whatever the
+  hook returns. The hook can add an objection, never remove one.
 
 ### Checking it works
 
@@ -70,6 +79,64 @@ Expected output:
 
 Then inside a Claude Code session, ask the agent to run `rm -rf /`. It should
 be denied before it executes, and the agent should explain why.
+
+## Failure behavior
+
+The hook is designed to fail open. A broken hook must never turn into a lockout
+where every Bash call is blocked, and it must never fail silently either. The
+rule: a decision is only ever made on a well-formed payload with a successful
+classification. Anything else produces exit 1 and a one-line warning on
+stderr. Claude Code treats exit 1 as a non-blocking hook error, shows the
+notice `PreToolUse:Bash hook error` with the first line of stderr in the
+transcript, and lets the call continue through the normal permission flow.
+
+| Case | Script behavior | What Claude Code does |
+|---|---|---|
+| Malformed JSON on stdin | exit 1, stderr `safe-command-guardrails hook: malformed JSON on stdin (...); failing open` | Non-blocking error notice. Call proceeds under normal permissions. |
+| Empty stdin | exit 1, stderr `... empty stdin, expected PreToolUse JSON; failing open` | Same. |
+| Non-Bash tool, or no `command` field | exit 0, no output | No decision. Call proceeds under normal permissions. Not an error, so no notice. |
+| Script crashes (classifier bug, import failure, stdin read error) | exit 1, stderr `... classifier error <Type>: <message>; failing open` | Non-blocking error notice. Call proceeds under normal permissions. |
+| Interpreter not found on PATH | The shell exits 127 before the script runs, stderr `python3: command not found` | Non-blocking error notice with that shell message. Call proceeds under normal permissions. Every Bash call will show the notice until the path is fixed. |
+
+All five cases are exercised by `--self-test` except the missing interpreter,
+which is a property of the shell, not the script.
+
+If you want the opposite policy, where a failing hook blocks the call, add
+`"onFailure": "block"` to the hook entry (Claude Code v2.1.295 or later). With
+that setting, every row above except the non-Bash row becomes a block,
+including the missing-interpreter case. Only do this if you are confident the
+interpreter path is stable, otherwise a PATH change locks out every shell
+command.
+
+### Pointing the hook at a specific interpreter
+
+The default snippet uses `python3`, which is right for macOS and most Linux
+distributions. If the notice says `command not found`, pin the interpreter:
+
+| Platform | Use |
+|---|---|
+| macOS, Linux with `python3` on PATH | `python3 ~/.claude/skills/safe-command-guardrails/scripts/check_command.py --hook` |
+| Linux where only `python` exists | `python ~/.claude/skills/safe-command-guardrails/scripts/check_command.py --hook` |
+| Any system, most robust | an absolute path, for example `/usr/bin/python3 ...` or `/opt/homebrew/bin/python3 ...` |
+| Windows with the Python launcher | `py -3 %USERPROFILE%\.claude\skills\safe-command-guardrails\scripts\check_command.py --hook` |
+| Windows without the launcher | `python %USERPROFILE%\.claude\skills\safe-command-guardrails\scripts\check_command.py --hook` |
+
+Find the absolute path with `which python3` (Unix) or `where python` and
+`py -0p` (Windows). You can also use the exec form with `"command"` set to the
+interpreter and `"args"` holding the script path and `--hook`, which avoids
+quoting problems with spaces in paths.
+
+### Reproducing the tests by hand
+
+```bash
+S=~/.claude/skills/safe-command-guardrails/scripts/check_command.py
+printf '{"tool_name":"Bash","tool_input":{' | python3 $S --hook; echo "exit=$?"
+printf '' | python3 $S --hook; echo "exit=$?"
+printf '{"tool_name":"Read","tool_input":{"file_path":"/etc/hosts"}}' | python3 $S --hook; echo "exit=$?"
+```
+
+Expected: the first two print a warning to stderr and exit 1, the third prints
+nothing and exits 0.
 
 ## Other agents
 

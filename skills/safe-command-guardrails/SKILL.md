@@ -141,12 +141,13 @@ echo "echo \$ANTHROPIC_API_KEY" | python3 scripts/check_command.py
 # SECRET: prints a secret environment variable   (exit code 3)
 
 python3 scripts/check_command.py --self-test
-# 42/42 passed
+# 53/53 passed
 ```
 
 Exit codes: 0 ALLOW, 1 CONFIRM, 2 BLOCK, 3 SECRET. The `--hook` flag switches
 to Claude Code PreToolUse mode, which reads JSON on stdin and prints a
-permission decision. See `references/claude-code-hook.md`.
+permission decision. In that mode a bad payload or an internal error fails
+open with a warning rather than blocking. See `references/claude-code-hook.md`.
 
 ## Examples
 
