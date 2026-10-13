@@ -46,7 +46,7 @@ class WebFetchTool(Tool):
 
         try:
             headers = {
-                "User-Agent": "Mozilla/5.0 (compatible; Cipher/1.0; +https://github.com/cipher)"
+                "User-Agent": "Mozilla/5.0 (compatible; Cipher/1.0; +https://github.com/koreydillon/cipher-harness)"
             }
             response = requests.get(url, headers=headers, timeout=15)
             response.raise_for_status()
