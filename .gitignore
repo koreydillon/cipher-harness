@@ -20,6 +20,9 @@ env/
 # Cipher runtime
 .cipher/
 
+# Skill zips (built from skills/, not committed)
+dist/
+
 # OS
 .DS_Store
 Thumbs.db

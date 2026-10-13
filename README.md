@@ -119,6 +119,24 @@ All settings live in `.env` (see `.env.example`). The most useful knobs:
 | `CIPHER_AUTO_MODE` | `false` | Start sessions in autonomous mode |
 | `CIPHER_PLUGIN_DIR` | `~/.cipher/plugins` | Where to look for plugins |
 
+## Skills
+
+Two parts of Cipher are packaged as standalone agent skills. Each is a folder with a `SKILL.md` and no dependency on this repo, so any agent that reads skill files can use them.
+
+| Skill | What it does |
+|---|---|
+| [`skills/safe-command-guardrails`](skills/safe-command-guardrails/) | Classifies shell, git, SQL, and cloud commands into block, confirm, or allow tiers and catches credential leaks. Includes an optional standard-library script that enforces the tiers as a Claude Code PreToolUse hook. |
+| [`skills/codebase-orientation`](skills/codebase-orientation/) | A 10-call procedure for mapping an unfamiliar repository with listing, search, and a few reads, plus a production-signal check that stops before any change. |
+
+**Install:** copy the skill folder into your agent's skills directory. For Claude Code that is `~/.claude/skills/` (global) or `.claude/skills/` inside a project. Cursor, Copilot, Codex CLI, and other agents each have an equivalent directory; check their docs for the path.
+
+```bash
+cp -r skills/safe-command-guardrails ~/.claude/skills/
+cp -r skills/codebase-orientation ~/.claude/skills/
+```
+
+The skills are also listed on [Agensi](https://agensi.io) (TODO: add listing links).
+
 ## Status
 
 This is the open-source harness: agent loop, tool system, REPL. A separate fine-tuning track (training data, LoRA weights, eval harness) lives privately and is not part of this repo.
